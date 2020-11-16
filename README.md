@@ -15,9 +15,6 @@ This module has two different funtionalities:
 1. Handling the bookeeping of all the different data obtained by the simulations (operator matrices, eigenvalues, etc.)
 2. Representing and Visualizing the data in comprehensive ways.
 
-### FockSpaceAnnulus
-Work in progress
-
 ### IQHAnnulus
 Simple analysis of the non-interacting integer quantum Hall system, usually used for testing out new ideas and operators.
 
