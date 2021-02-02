@@ -6,7 +6,7 @@ import random
 from ATLASClusterInterface import errorCorrectionsAndTests as EC
 import yaml
 
-file = open('configurations.yml', 'r')
+file = open('../configurations.yml', 'r')
 docs = yaml.full_load(file)
 file.close()
 directories = docs['directories']
