@@ -4,8 +4,10 @@ from matplotlib import pyplot as plt
 import numpy as np
 from matplotlib.widgets import Slider
 from DataManaging import fileManaging as FM
+import os
 
-matplotlib.use('Qt5Agg')
+if os.getcwd()[0] != "/":
+    matplotlib.use('Qt5Agg')
 
 
 def write_spectrum_data_to_file(filename, spectrum, title, xlabel, ylabel):
