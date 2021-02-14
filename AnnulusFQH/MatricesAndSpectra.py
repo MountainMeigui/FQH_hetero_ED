@@ -2,86 +2,19 @@ import numpy as np
 from matplotlib import pyplot as plt
 import scipy.sparse as sparse
 from scipy.sparse.linalg import eigsh
+from scipy.linalg import eigh
 from time import sleep
 from datetime import datetime
-
+from scipy.special import binom
 from AnnulusFQH import BasisAndMBNonInteracting as GA, InteractionMatrices as LCA, \
     singleParticleOperatorsOnAnnulus as SPA
 from AnnulusFQH.usefulFunctions import modifiedGramSchmidt
 from DataManaging import fileManaging as FM, graphData
 from DataManaging.ParametersAnnulus import *
-from ATLASClusterInterface import JobSender as JS, errorCorrectionsAndTests as EC, MaSWrapperForATLAS as AMASW
-from clusterScripts import scriptNames
+# from ATLASClusterInterface import JobSender as JS, errorCorrectionsAndTests as EC, MaSWrapperForATLAS as AMASW
+# from clusterScripts import scriptNames
 import os
 import shutil
-
-
-def create_matrix_pieces(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name, params_filename):
-    params = ParametersAnnulus(params_filename)
-    common_args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
-
-    filename_complete_matrix = FM.filename_complete_matrix(matrix_name, common_args)
-    if EC.does_file_really_exist(filename_complete_matrix):
-        print("already created " + filename_complete_matrix)
-        return 0
-
-    queue = params.matrix_pieces_queue
-    mem, vmem = JS.get_mem_vmem_vals(queue, params.matrix_pieces_mem, params.matrix_pieces_vmem)
-
-    Mmin = MminL - edge_states
-    Mmax = MmaxL + edge_states
-    hilbert_space_size = GA.size_of_hilbert_space(Mmin, Mmax, N, lz_val)
-    if hilbert_space_size < 10000:
-        args = [matrix_name] + common_args
-        str_args = [str(a) for a in args]
-        str_args = '-'.join(str_args)
-        filename_job = str_args
-        JS.send_job(scriptNames.fullMBMatrix, queue, mem=mem, vmem=vmem, script_args=args,
-                    pbs_filename=filename_job)
-        return 0
-
-    slice_size = int(hilbert_space_size / params.speeding_parameter)
-    last_slice_size = hilbert_space_size - params.speeding_parameter * slice_size
-
-    slice_start = 0
-    slice_end = slice_size
-    count_num_jobs_sent = 0
-    for i in range(params.speeding_parameter):
-        filename_args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
-        filename_martix_piece = FM.filename_matrix_piece(matrix_name, filename_args, [slice_start, slice_end - 1])
-        if EC.does_file_really_exist(filename_martix_piece):
-            print("matrix piece " + filename_martix_piece + " already exists!")
-        else:
-            count_num_jobs_sent = count_num_jobs_sent + 1
-            args = [matrix_name] + common_args + [slice_start, slice_end] + [params.speeding_parameter, params_filename]
-            str_args = [str(a) for a in args]
-            str_args = '-'.join(str_args[:-1])
-            filename_job = str_args
-            JS.send_job(scriptNames.piecesMBMatrix, queue, mem=mem, vmem=vmem, script_args=args,
-                        pbs_filename=filename_job)
-            sleep(2)
-        slice_start = slice_start + slice_size
-        slice_end = slice_end + slice_size
-    # taking care of last slice
-    if last_slice_size > 0:
-        slice_end = slice_start + last_slice_size
-        filename_args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
-        filename_martix_piece = FM.filename_matrix_piece(matrix_name, filename_args, [slice_start, slice_end - 1])
-        if EC.does_file_really_exist(filename_martix_piece):
-            print("matrix piece " + filename_martix_piece + " already exists!")
-        else:
-            count_num_jobs_sent = count_num_jobs_sent + 1
-            args = [matrix_name] + common_args + [slice_start, slice_end] + [params.speeding_parameter, params_filename]
-            str_args = [str(a) for a in args]
-            str_args = '-'.join(str_args[:-1])
-            filename = str_args
-            JS.send_job(scriptNames.piecesMBMatrix, queue, mem=mem, vmem=vmem, script_args=args,
-                        pbs_filename=filename)
-
-    if count_num_jobs_sent == 0:
-        AMASW.unite_and_write_full_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name,
-                                          params_filename)
-    return 0
 
 
 def unite_matrix_pieces(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name, output=1):
@@ -129,7 +62,7 @@ def delete_excess_pieces(MminL, MmaxL, edge_states, N, lz_val, matrix_label, mat
     args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
     directory = FM.filename_matrix_pieces_directory(matrix_name, args)
     filename_full = FM.filename_complete_matrix(matrix_name, args)
-    if EC.does_file_really_exist(filename_full):
+    if FM.does_file_really_exist(filename_full):
         shutil.rmtree(directory)
         print("full matrix is present so pieces files were deleted")
         return 0
@@ -140,7 +73,7 @@ def delete_excess_pieces(MminL, MmaxL, edge_states, N, lz_val, matrix_label, mat
 def create_complete_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name, output='matrix'):
     args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
     filename_matrix = FM.filename_complete_matrix(matrix_name, args)
-    if EC.does_file_really_exist(filename_matrix):
+    if FM.does_file_really_exist(filename_matrix):
         if output:
             row, col, mat_elements = FM.read_complete_matrix(matrix_name, args)
             return row, col, mat_elements
@@ -181,7 +114,7 @@ def extract_complete_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label, 
     args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
     matrix_filename = FM.filename_complete_matrix(matrix_name, args)
     hilbert_space_dim = GA.size_of_hilbert_space(MminL - edge_states, MmaxL + edge_states, N, lz_val)
-    if EC.does_file_really_exist(matrix_filename):
+    if FM.does_file_really_exist(matrix_filename):
         row, col, mat_elements = FM.read_complete_matrix(matrix_name, args)
     else:
 
@@ -194,24 +127,6 @@ def extract_complete_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label, 
                                dtype=complex)
     matrix = matrix.tocsr()
     return matrix
-
-
-def calc_hamiltonian_pieces(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, params_filename, send_jobs=True):
-    params = ParametersAnnulus(params_filename)
-    hamiltonian_terms_names = ['interactions', 'confining_potential', 'SC_term', 'FM_term']
-    all_matrices_filenames = []
-    for i in range(len(hamiltonian_labels)):
-        if hamiltonian_labels[i] != 'None':
-            while EC.how_many_jobs() + params.speeding_parameter > params.max_jobs_in_queue_S:
-                sleep(100)
-                print("too many jobs in queue!")
-            args = [MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels[i]]
-            matrix_filename = FM.filename_complete_matrix(hamiltonian_terms_names[i], args)
-            all_matrices_filenames.append(matrix_filename)
-            if not EC.does_file_really_exist(matrix_filename) and send_jobs:
-                create_matrix_pieces(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels[i],
-                                     hamiltonian_terms_names[i], params_filename)
-    return all_matrices_filenames
 
 
 def extract_Hamiltonian(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, run_on_cluster=1):
@@ -229,13 +144,13 @@ def extract_Hamiltonian(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels
         if hamiltonian_labels[i] != 'None':
             args = [MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels[i]]
             filename_ham_term = FM.filename_complete_matrix(hamiltonian_terms_names[i], args)
-            if EC.does_file_really_exist(filename_ham_term):
+            if FM.does_file_really_exist(filename_ham_term):
                 row, col, mat_elements = FM.read_complete_matrix(hamiltonian_terms_names[i], args)
             else:
 
                 if run_on_cluster:
                     print("matrix should have been created by now. you have a bug!")
-                    return 0
+                    return -1
                 else:
                     row, col, mat_elements = create_complete_matrix(MminL, MmaxL, edge_states, N, lz_val,
                                                                     hamiltonian_labels[i], hamiltonian_terms_names[i])
@@ -250,40 +165,33 @@ def extract_Hamiltonian(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels
     return hamiltonian
 
 
-def take_eigenvalue(element):
-    return element[0]
-
-
-def calc_eigenVals_Vecs(matrix, k):
+def calc_eigenVals_Vecs(matrix, k, return_eigenvectors=True):
     if matrix.shape[0] >= 6500:
         matrix = matrix.tocsr()
-
-        start_time = datetime.now()
-        # eigenVals, eigenVecs = sparse.linalg.eigsh(matrix, which='SA', k=k)
-        eigenVals, eigenVecs = eigsh(matrix, which='SA', k=k)
-        duration = datetime.now() - start_time
-        print("finding eigenvalues took " + str(duration))
-
-        start_time = datetime.now()
-        spectrum = [(eigenVals[i], np.array(eigenVecs[:, i])) for i in range(len(eigenVals))]
-        spectrum = sorted(spectrum, key=take_eigenvalue)
-        duration = datetime.now() - start_time
-        print("my weird data structure took " + str(duration))
+        if return_eigenvectors:
+            eigenVals, eigenVecs = eigsh(matrix, which='SA', k=k, return_eigenvectors=True)
+            return eigenVals, eigenVecs
+        else:
+            eigenVals = eigsh(matrix, which='SA', k=k, return_eigenvectors=False)
+            # When eigenvectors aren't returned the eigenvalues are not sorted according to algebraic value
+            eigenVals = sorted(eigenVals)
+            return eigenVals
 
     else:
-        eigenVals, eigenVecs = np.linalg.eigh(matrix.todense())
-        spectrum = [(eigenVals[i], np.reshape(np.array(eigenVecs[:, i]), eigenVecs.shape[0])) for i in
-                    range(len(eigenVals))]
-        spectrum = sorted(spectrum, key=take_eigenvalue)
-
-    return spectrum
+        if return_eigenvectors:
+            eigenVals, eigenVecs = eigh(matrix.todense())
+            # Vecs are columns : eigenVecs[:,i]
+            return eigenVals, eigenVecs
+        else:
+            eigenVals = eigh(matrix.todense(), eigvals_only=True)
+            return eigenVals
 
 
 def calc_lz_total_for_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, params_filename,
                                run_on_cluster=1):
     filename_lz_spectrum = FM.filename_spectrum_lz_total_vals(MminL, MmaxL, edge_states, N, hamiltonian_labels,
                                                               parameters)
-    if EC.does_file_really_exist(filename_lz_spectrum):
+    if FM.does_file_really_exist(filename_lz_spectrum):
         print("already created " + filename_lz_spectrum)
         return 0
 
@@ -291,7 +199,7 @@ def calc_lz_total_for_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian
         lz_val = int(float(lz_val))
     filename_spectrum = FM.filename_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
                                                          parameters)
-    if EC.does_file_really_exist(filename_spectrum):
+    if FM.does_file_really_exist(filename_spectrum):
         spectrum_eigenstates = FM.read_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
                                                             parameters)
     else:
@@ -300,13 +208,14 @@ def calc_lz_total_for_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian
             return 0
         spectrum_eigenstates = get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
                                                       parameters, params_filename, run_on_cluster)
+    spectrum = spectrum_eigenstates['eigVals']
+    eigstates = spectrum_eigenstates['eigVecs']
 
-    spectrum = np.array([a[0] for a in spectrum_eigenstates])
-    lz_total_spectrum_vals = np.zeros(len(spectrum_eigenstates))
+    lz_total_spectrum_vals = np.zeros(len(spectrum))
     lz_total_matrix = extract_complete_matrix(MminL, MmaxL, edge_states, N, lz_val, 'None', 'total_angular_momentum',
                                               run_on_cluster)
-    for i in range(len(spectrum_eigenstates)):
-        state = spectrum_eigenstates[i][1]
+    for i in range(len(spectrum)):
+        state = eigstates[:, i]
         lz_total_spectrum_vals[i] = np.conjugate(state).transpose() @ lz_total_matrix @ state
 
     xlabel = 'Lz total'
@@ -321,28 +230,22 @@ def calc_lz_total_for_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian
     return lz_total_spectrum_vals, spectrum
 
 
-def get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, params_filename,
+def get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, num_of_eigstates,
                            run_on_cluster=1):
-    params = ParametersAnnulus(params_filename)
     if lz_val != 'not_fixed':
         lz_val = int(float(lz_val))
     filename_spectrum = FM.filename_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
                                                          parameters)
-    if EC.does_file_really_exist(filename_spectrum):
+    if FM.does_file_really_exist(filename_spectrum):
         spectrum = FM.read_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters)
         size_hilbert_space = GA.size_of_hilbert_space(MminL - edge_states, MmaxL + edge_states, N, lz_val)
-        if len(spectrum) >= params.num_of_eigstates or size_hilbert_space <= params.num_of_eigstates:
+        if len(spectrum['eigVals']) >= num_of_eigstates or size_hilbert_space <= num_of_eigstates:
             return spectrum
 
     hamiltonian = extract_Hamiltonian(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters,
                                       run_on_cluster)
-    spectrum = calc_eigenVals_Vecs(hamiltonian, params.num_of_eigstates)
-    if params.eigenstates_cutoff:
-        print("eigenstates_cutoff")
-        eig_spectrum_new1 = spectrum[:params.eigenstates_cutoff]
-
-        eig_spectrum_new2 = [(spectrum[i][0], []) for i in range(params.eigenstates_cutoff, len(spectrum))]
-        spectrum = eig_spectrum_new1 + eig_spectrum_new2
+    eigVals, eigVecs = calc_eigenVals_Vecs(hamiltonian, num_of_eigstates)
+    spectrum = {'eigVals': eigVals, 'eigVecs': eigVecs}
     FM.write_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, spectrum)
     return spectrum
 
@@ -352,15 +255,22 @@ def calc_matrix_in_subspace(MminL, MmaxL, edge_states, N, lz_val, matrix_label, 
     args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
     filename_subspace_matrix = FM.filename_edge_subspace_matrix(matrix_name, num_states, args)
 
-    spec_states = FM.read_spectrum_eigenstates_from_file(filename_spectrum_eigenstates)
+    spectrum_eigenstates = FM.read_spectrum_eigenstates_from_file(filename_spectrum_eigenstates)
+
+    spectrum = spectrum_eigenstates['eigVals']
+    eigstates = spectrum_eigenstates['eigVecs']
+
+    if len(spectrum) < num_states:
+        num_states = len(spectrum)
+
     subspace_matrix = np.zeros(shape=(num_states, num_states), dtype=complex)
 
     matrix_full = extract_complete_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name, 0)
 
     for i in range(num_states):
         for j in range(num_states):
-            vi = spec_states[i][1]
-            vj = spec_states[j][1]
+            vi = eigstates[:, i]
+            vj = eigstates[:, j]
             vi = np.transpose(vi.conjugate())
             val = vi @ matrix_full @ vj
             subspace_matrix[i, j] = val
@@ -373,7 +283,7 @@ def extract_matrix_in_low_lying_subspace(MminL, MmaxL, edge_states, N, lz_val, m
                                          subspace_size, run_on_cluster=0, params_filename_short='basic_config.yml'):
     args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
     filename_subspace_matrix = FM.filename_edge_subspace_matrix(matrix_name, subspace_size, args)
-    if EC.does_file_really_exist(filename_subspace_matrix):
+    if FM.does_file_really_exist(filename_subspace_matrix):
         matrix_subspace = FM.read_edge_subspace_matrix(matrix_name, subspace_size, args)
         return matrix_subspace
     hamiltonian_labels = ['toy', 'None', 'None', 'None']
@@ -381,15 +291,13 @@ def extract_matrix_in_low_lying_subspace(MminL, MmaxL, edge_states, N, lz_val, m
     params_filename = FM.filename_parameters_annulus(params_filename_short)
     spectrum_eigenstates = get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
                                                   parameters, params_filename, run_on_cluster)
+    eigstates = spectrum_eigenstates['eigVecs']
+
     matrix_full = extract_complete_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name,
                                           run_on_cluster)
     matrix_subspace = np.zeros(shape=[subspace_size, subspace_size], dtype=complex)
-    len_vecs = len(spectrum_eigenstates[1][1])
-    vecs_in_matrix = np.zeros(shape=[len_vecs, subspace_size], dtype=complex)
-    for i in range(subspace_size):
-        vecs_in_matrix[:, i] = spectrum_eigenstates[i][1]
 
-    ortho_vecs = modifiedGramSchmidt(vecs_in_matrix)
+    ortho_vecs = modifiedGramSchmidt(eigstates)
 
     for i in range(subspace_size):
         for j in range(i + 1):
@@ -429,26 +337,23 @@ def calc_lz_total_for_low_spectrum_subspace(MminL, MmaxL, edge_states, N, hamilt
                                                                             hamiltonian_labels, parameters,
                                                                             subspace_size)
 
-    if EC.does_file_really_exist(filename_lz_spectrum):
+    if FM.does_file_really_exist(filename_lz_spectrum):
         return filename_lz_spectrum
 
     lz_val = 'not_fixed'
     hamiltonian = extract_low_lying_subspace_Hamiltonian(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
                                                          parameters, subspace_size, run_on_cluster)
 
-    eigen_vals, eigen_vecs = np.linalg.eigh(hamiltonian)
+    spectrum_eigenstates = calc_eigenVals_Vecs(hamiltonian, -1)
+    spectrum = spectrum_eigenstates['eigVals']
+    eigstates = spectrum_eigenstates['eigVecs']
 
-    spectrum_eigenstates = [(eigen_vals[i], eigen_vecs[:, i]) for i in range(len(eigen_vals))]
-    spectrum_eigenstates = sorted(spectrum_eigenstates, key=take_eigenvalue)
-
-    spectrum = np.array([a[0] for a in spectrum_eigenstates])
-
-    lz_total_spectrum_vals = np.zeros(len(spectrum_eigenstates))
+    lz_total_spectrum_vals = np.zeros(len(spectrum))
     lz_total_matrix = extract_matrix_in_low_lying_subspace(MminL, MmaxL, edge_states, N, lz_val, 'None',
                                                            'total_angular_momentum', subspace_size)
 
     for i in range(len(spectrum_eigenstates)):
-        state = spectrum_eigenstates[i][1]
+        state = eigstates[:, i]
         lz_total_spectrum_vals[i] = np.conjugate(state).transpose() @ lz_total_matrix @ state
 
     xlabel = 'Lz total'
@@ -465,18 +370,32 @@ def calc_lz_total_for_low_spectrum_subspace(MminL, MmaxL, edge_states, N, hamilt
 
 def get_groundstate(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, params_filename,
                     run_on_cluster=1):
-    spectrum = get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters,
-                                      params_filename, run_on_cluster)
-    gs = spectrum[0][1]
+    spectrum_eigenstates = get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters,
+                                                  params_filename, run_on_cluster)
+    eigstates = spectrum_eigenstates['eigVecs']
+    gs = eigstates[:, 0]
     return gs
 
 
 def calc_full_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_center_val, hamiltonian_labels, parameters,
-                                 window_of_lz, params_filename):
+                                 window_of_lz, num_eigenstates):
+    """
+    Calculate total-angular-momentum-resolved spectrum. Create matrices if they are not present.
+    :param MminL:
+    :param MmaxL:
+    :param edge_states:
+    :param N:
+    :param lz_center_val:
+    :param hamiltonian_labels:
+    :param parameters:
+    :param window_of_lz:
+    :param params_filename:
+    :return:
+    """
     filename_full_spectrum = FM.filename_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels,
                                                        parameters)
 
-    if EC.does_file_really_exist(filename_full_spectrum):
+    if FM.does_file_really_exist(filename_full_spectrum):
         full_spectrum = FM.read_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels,
                                               parameters)
         return full_spectrum
@@ -496,9 +415,8 @@ def calc_full_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_center_val, ha
     full_spectrum = {}
     for lz in range(lz_min, lz_max + 1):
         print("finding the spectrum for lz=" + str(lz))
-        spec_states = get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels, parameters,
-                                             params_filename, 0)
-        spectrum_lz = np.array([spec_states[i][0] for i in range(len(spec_states))])
+        hamiltonian = extract_Hamiltonian(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels, parameters, 0)
+        spectrum_lz = calc_eigenVals_Vecs(hamiltonian, num_eigenstates, return_eigenvectors=False)
         full_spectrum[lz] = spectrum_lz
 
     title = 'low spectrum of system with\nN=' + str(N) + ' MminL=' + str(MminL) + ' MmaxL=' + str(
@@ -511,79 +429,43 @@ def calc_full_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_center_val, ha
     return full_spectrum
 
 
-def count_num_edge_states(MminL, MmaxL, edge_states, N, params_filename_short='basic_config.yml'):
-    hamiltonian_labels = ['toy', 'None', 'None', 'None']
-    h_parameters = [1.0, 0.0, 0.0, 0.0]
-    m = 3
-    lz_laughlin = m * N * (N - 1) / 2 + MminL * N
-    lz_laughlin = int(lz_laughlin)
-    params_filename = FM.filename_parameters_annulus(params_filename_short)
-    full_spectrum = calc_full_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_laughlin, hamiltonian_labels,
-                                                 h_parameters, 'all', params_filename)
-    number_of_edge_states = graphData.count_gs_degeneracies(full_spectrum)
-    return number_of_edge_states
+def count_num_edge_states(edge_states, N):
+    """
+    Gives the number of edge states for a certain set of parameters
+    :param MminL:
+    :param MmaxL:
+    :param edge_states:
+    :param N:
+    :param params_filename_short:
+    :return:
+    """
+    num_edge_states = binom(N + 2 * edge_states, N)
+    return num_edge_states
 
 
-def polyval(p, x):
-    highest_power = len(p) - 1
-    val = sum([p[i] * np.power(x, highest_power - i) for i in range(len(p))])
-    return val
+# def polyval(p, x):
+#     highest_power = len(p) - 1
+#     val = sum([p[i] * np.power(x, highest_power - i) for i in range(len(p))])
+#     return val
 
 
 def calc_luttinger_parameter_from_full_spectrum(full_spectrum, lz_center_val, N, edge_states):
+    """
+        Calculate Luttinger parameter from spectrum.
+        Note - if the spectrum doesn't exists, the script creates it.
+        :param params_filename:
+        :param lz_center_val:
+        :return:
+        """
+
     first_arc_lz = np.array([lz_center_val + i for i in range(N)])
-    first_arc_energy = np.array([full_spectrum[lz][0] for lz in first_arc_lz])
-    plt.figure()
-    plt.plot(first_arc_lz, first_arc_energy, '_')
-
-    p_first_arc, V_first_arc = np.polyfit(first_arc_lz, first_arc_energy, 2, cov=True)
-    omega = p_first_arc[0] * 2 * first_arc_lz[0] + p_first_arc[1]
-
-    polyfitted = np.array([np.polyval(p_first_arc, lz) for lz in first_arc_lz])
-    plt.plot(first_arc_lz, polyfitted)
-
-    plt.figure()
-    umbrella_lz = np.array(
-        [lz_center_val - N * edge_states + N * i for i in range(2 * edge_states + 1)])
-    umbrella_energy = np.array([full_spectrum[lz][0] for lz in umbrella_lz])
-    umbrella_J = np.array([2 * excitation for excitation in range(-edge_states, edge_states + 1)])
-    plt.plot(umbrella_lz, umbrella_energy, '_')
-
-    p_umbrella, V_umbrella = np.polyfit(umbrella_J, umbrella_energy, 2, cov=True)
-    polyfitted_u = np.array([np.polyval(p_umbrella, J) for J in umbrella_J])
-    plt.plot(umbrella_lz, polyfitted_u)
-    omega_J_over_four = p_umbrella[0]
-    print("vJ = " + str(omega_J_over_four))
-
-    g = omega_J_over_four * 4 / omega
-    print("***********")
-    print(g)
-    plt.show()
-    return g
-
-
-def calc_luttinger_parameter_from_full_spectrum(params_filename, lz_center_val):
-    params = ParametersAnnulus(params_filename)
-    window_of_lz = 'all'
-    filename_full_spectrum = FM.filename_full_spectrum(params.MminLaughlin, params.MmaxLaughlin, params.edge_states,
-                                                       params.N, window_of_lz, params.hamiltonian_labels,
-                                                       params.h_parameters)
-    if EC.does_file_really_exist(filename_full_spectrum):
-        full_spectrum = FM.read_full_spectrum(params.MminLaughlin, params.MmaxLaughlin, params.edge_states,
-                                              params.N, window_of_lz, params.hamiltonian_labels, params.h_parameters)
-    else:
-        full_spectrum = calc_full_low_lying_spectrum(params.MminLaughlin, params.MmaxLaughlin, params.edge_states,
-                                                     params.N, lz_center_val, params.hamiltonian_labels,
-                                                     params.h_parameters, window_of_lz, params_filename)
-
-    first_arc_lz = np.array([lz_center_val + i for i in range(params.N)])
     first_arc_energy = np.array([full_spectrum[lz][0] for lz in first_arc_lz])
     omega_s = extract_omega_s_from_first_arc(first_arc_lz, first_arc_energy)
 
     umbrella_lz = np.array(
-        [lz_center_val - params.N * params.edge_states + params.N * i for i in range(2 * params.edge_states + 1)])
+        [lz_center_val - N * edge_states + N * i for i in range(2 * edge_states + 1)])
     umbrella_energy = np.array([full_spectrum[lz][0] for lz in umbrella_lz])
-    umbrella_J = np.array([2 * excitation for excitation in range(-params.edge_states, params.edge_states + 1)])
+    umbrella_J = np.array([2 * excitation for excitation in range(-edge_states, edge_states + 1)])
 
     omega_J = extract_omega_J_from_umbrella_J(umbrella_J, umbrella_lz, umbrella_energy)
 
@@ -598,7 +480,15 @@ def calc_luttinger_parameter_from_full_spectrum(params_filename, lz_center_val):
     return g
 
 
+
 def extract_omega_s_from_first_arc(first_arc_lz, first_arc_energy, plot_graphs_to_check=True):
+    """
+    Calculating a part of the Luttinger parameter
+    :param first_arc_lz:
+    :param first_arc_energy:
+    :param plot_graphs_to_check:
+    :return:
+    """
     p_first_arc, V_first_arc = np.polyfit(first_arc_lz, first_arc_energy, 2, cov=True)
     omega_s = p_first_arc[0] * 2 * first_arc_lz[0] + p_first_arc[1]
 
@@ -616,6 +506,14 @@ def extract_omega_s_from_first_arc(first_arc_lz, first_arc_energy, plot_graphs_t
 
 
 def extract_omega_J_from_umbrella_J(umbrella_J, umbrella_lz, umbrella_energy, plot_graphs_to_check=True):
+    """
+    Calculating a part of the Luttinger parameter
+    :param umbrella_J:
+    :param umbrella_lz:
+    :param umbrella_energy:
+    :param plot_graphs_to_check:
+    :return:
+    """
     p_umbrella, V_umbrella = np.polyfit(umbrella_J, umbrella_energy, 2, cov=True)
     omega_J_over_four = p_umbrella[0]
     omega_J = omega_J_over_four * 4
@@ -631,6 +529,17 @@ def extract_omega_J_from_umbrella_J(umbrella_J, umbrella_lz, umbrella_energy, pl
 
 def calc_luttinger_parameter_from_scratch(params_filename, lz_center_val, plot_graphs_to_check=True,
                                           do_spectrum_calculation=True, cutoff_edges=False):
+    """
+    Calculating the luttinger liquid parameter.
+    NOT compatible for large systems that need to be broken down
+    and processed in pieces on the CLuster
+    :param params_filename:
+    :param lz_center_val:
+    :param plot_graphs_to_check:
+    :param do_spectrum_calculation:
+    :param cutoff_edges:
+    :return:
+    """
     params = ParametersAnnulus(params_filename)
     window_of_lz = 'all'
     filename_full_spectrum = FM.filename_spectrum_luttinger_parm(params.MminLaughlin, params.MmaxLaughlin,
@@ -694,11 +603,19 @@ def calc_luttinger_parameter_from_scratch(params_filename, lz_center_val, plot_g
 
 
 def create_density_profile(params_filename, plot_graph=0):
+    """
+    According to the parameters in params_filename we take (or create) the groundstate of a given Hamiltonian
+    and create a density profile for it by calculating the observable of the density operator at different points
+    between Rmin and Rmax
+    :param params_filename:
+    :param plot_graph:
+    :return:
+    """
     params = ParametersAnnulus(params_filename)
     filename_density = FM.filename_density_profile_groundstate(params.MminLaughlin, params.MmaxLaughlin,
                                                                params.edge_states, params.N, params.hamiltonian_labels,
                                                                params.h_parameters, params.num_measurement_points)
-    if EC.does_file_really_exist(filename_density):
+    if FM.does_file_really_exist(filename_density):
         print("file for density already exists")
         if plot_graph:
             rs, density_observable = graphData.plot_graph_from_file(filename_density)
@@ -755,6 +672,13 @@ def estimate_confining_potential_energy_from_raw_parms(MminL, MmaxL, edge_states
 
 
 def calc_average_gap(spectrum_filename, num_of_states_before_gap):
+    """
+    Calculates the average difference between 2 consecutive points on the graph -
+    as a measure for the resolution of the energy graph
+    :param spectrum_filename:
+    :param num_of_states_before_gap:
+    :return:
+    """
     spectrum = FM.read_spectrum_data_from_file(spectrum_filename)
     gaps = np.zeros(shape=(len(spectrum)))
     for i, flux in zip(range(len(gaps)), spectrum.keys()):
@@ -764,6 +688,13 @@ def calc_average_gap(spectrum_filename, num_of_states_before_gap):
 
 
 def calc_min_gap(spectrum_filename, num_of_states_before_gap):
+    """
+    Calculates the minimal difference between 2 consecutive points on the graph -
+    as a measure for the resolution of the energy graph
+    :param spectrum_filename:
+    :param num_of_states_before_gap:
+    :return:
+    """
     spectrum = FM.read_spectrum_data_from_file(spectrum_filename)
     gaps = np.zeros(shape=(len(spectrum)))
     for i, flux in zip(range(len(gaps)), spectrum.keys()):
@@ -777,6 +708,13 @@ def calc_min_gap(spectrum_filename, num_of_states_before_gap):
 
 
 def calc_spectrum_energy_resolution(spectrum_filename, num_of_states_before_gap):
+    """
+    Calculates the maximal difference between 2 consecutive points on the graph -
+    as a measure for the resolution of the energy graph
+    :param spectrum_filename:
+    :param num_of_states_before_gap:
+    :return:
+    """
     spectrum = FM.read_spectrum_data_from_file(spectrum_filename)
     res1 = np.zeros(shape=(len(spectrum) - 1))
     fluxes = list(spectrum.keys())
@@ -784,6 +722,6 @@ def calc_spectrum_energy_resolution(spectrum_filename, num_of_states_before_gap)
     for i in range(len(spectrum) - 1):
         res1[i] = spectrum[fluxes[i + 1]][num_of_states_before_gap - 1] - spectrum[fluxes[i]][
             num_of_states_before_gap - 1]
-    avg1 = sum(res1) / len(res1)
+    # avg1 = sum(res1) / len(res1)
 
     return max(res1)
