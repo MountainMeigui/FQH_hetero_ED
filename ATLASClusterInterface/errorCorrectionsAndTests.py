@@ -1,10 +1,15 @@
-from ATLASClusterInterface import JobSender as JS
-from clusterScripts import scriptNames
 import os
 from time import sleep
 import yaml
 
-file = open('../configurations.yml', 'r')
+if os.getcwd()[0] == "/":
+    project_dir = os.path.dirname(__file__)
+    project_dir = "/" + "/".join(project_dir.split("/")[1:-1])
+    file = open(project_dir + '/configurations.yml', 'r')
+
+else:
+    file = open('../configurations.yml', 'r')
+
 docs = yaml.full_load(file)
 file.close()
 directories = docs['directories']
@@ -69,15 +74,6 @@ def failed_runs_of_matrix_pieces(matrix_name, args):
     all_failed_runs = extract_failed_runs()
     failed_runs = [job for job in all_failed_runs if job[:-2] == args_list]
     return failed_runs
-
-
-def rerun_failed_matrix_piece(job):
-    queue = 'N'
-    mem = '4gb'
-    vmem = '8gb'
-    filename = "-".join(job)
-    JS.send_job(scriptNames.piecesMBMatrix, queue, mem=mem, vmem=vmem, script_args=job, pbs_filename=filename)
-    return 0
 
 
 def is_job_still_running(job_name):
