@@ -2,7 +2,13 @@ import sys
 import os
 import yaml
 
-file = open('../configurations.yml', 'r')
+if os.getcwd()[0] == "/":
+    project_dir = os.path.dirname(__file__)
+    project_dir = "/" + "/".join(project_dir.split("/")[1:-1])
+    file = open(project_dir + '/configurations.yml', 'r')
+
+else:
+    file = open('../configurations.yml', 'r')
 docs = yaml.full_load(file)
 file.close()
 
@@ -15,9 +21,8 @@ import random
 from time import sleep
 from AnnulusFQH import InteractionMatrices as LCA, BasisAndMBNonInteracting as GA, \
     singleParticleOperatorsOnAnnulus as SPA
-from DataManaging.ParametersAnnulus import *
 from DataManaging import fileManaging as FM
-from ATLASClusterInterface import JobSender as JS, MaSWrapperForATLAS as AMASW
+from ATLASClusterInterface import JobSenderFQH as JS
 
 script_name = sys.argv[0]
 m = 3
@@ -31,16 +36,11 @@ lz_val = sys.argv[6]
 matrix_label = sys.argv[7]
 slice_start = int(sys.argv[8])
 slice_end = int(sys.argv[9])
-speeding_parameter = int(sys.argv[10])
-params_filename = sys.argv[11]
 
 Mmin = MminL - edge_states
 Mmax = MmaxL + edge_states
-params = ParametersAnnulus(params_filename)
 
 JS.limit_num_threads()
-if params.matrix_pieces_queue == 'P' or params.matrix_pieces_queue == 'M':
-    JS.limit_num_threads(4)
 
 """
 matrix_name in [interactions,FM_term,confining_potential,edge_correlation,density]
@@ -133,8 +133,3 @@ filename_args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
 sleep(random.random())
 FM.write_matrix_piece(matrix_name, filename_args, [slice_start, slice_end - 1], row_total, col_total,
                       mat_elements_total)
-# sleep(2)
-hilbert_space_dim = GA.size_of_hilbert_space(Mmin, Mmax, N, lz_val)
-if AMASW.all_pieces_present_in_matrix_pieces_directory(matrix_name, MminL, MmaxL, edge_states, N, lz_val, matrix_label,
-                                                       hilbert_space_dim, speeding_parameter):
-    AMASW.unite_and_write_full_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name, params_filename)
