@@ -149,3 +149,4 @@ cleanUp.py
 configurations.yml
 FockSpaceAnnulus/
 parametersAndClusterSendoff.py
+testing.py
