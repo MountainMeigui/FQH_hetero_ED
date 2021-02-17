@@ -97,6 +97,7 @@ def size_of_hilbert_space(Mmin, Mmax, N, lz_val):
             create_basis_annulus(0, Mmax - Mmin, N)
         else:
             create_basis_annulus_const_lz(0, Mmax - Mmin, N, lz_val - N * Mmin)
+        sleep(2)
         hilbert_space_size = FM.read_size_of_hilbert_space(Mmin, Mmax, N, lz_val)
         return hilbert_space_size
 
