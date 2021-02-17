@@ -162,7 +162,7 @@ def job_dict_unite_matrix_pieces(MminL, MmaxL, edge_states, N, lz_val, matrix_la
 
 
 def job_dict_get_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, num_of_eigstates=20,
-                          magnetic_flux=None, requestMemory=None, request_cpus=None):
+                          magnetic_flux=None, return_eigvecs=True, requestMemory=None, request_cpus=None):
     job_dict = {}
 
     job_dict['batch_parameters'] = [{}]
@@ -172,7 +172,33 @@ def job_dict_get_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labe
     if magnetic_flux != None:
         hamiltonian_labels = [hl + '_' + str(magnetic_flux) for hl in hamiltonian_labels]
     arguments = [MminL, MmaxL, edge_states, N, lz_val, *hamiltonian_labels, *parameters, num_of_eigstates,
-                 'calc_low_lying_spectrum']
+                 return_eigvecs, 'calc_low_lying_spectrum']
+    arguments = [str(a) for a in arguments]
+    arguments = " ".join(arguments)
+    job_dict['kargs_dict']['Arguments'] = arguments
+
+    if request_cpus:
+        job_dict['kargs_dict']['request_cpus'] = request_cpus
+    if requestMemory:
+        job_dict['kargs_dict']['requestMemory'] = requestMemory
+
+    return job_dict
+
+
+def job_dict_lz_resolved_spectrum(MminL, MmaxL, edge_states, N, lz_center_val, hamiltonian_labels, parameters,
+                                  window_of_lz, num_of_eigstates,
+                                  magnetic_flux=None, requestMemory=None, request_cpus=None):
+    job_dict = {}
+
+    job_dict['batch_parameters'] = [{}]
+    job_dict['py_script_path'] = project_dir + "/" + scriptNames.multiFile
+    job_dict['kargs_dict'] = {}
+
+    if magnetic_flux != None:
+        hamiltonian_labels = [hl + '_' + str(magnetic_flux) for hl in hamiltonian_labels]
+    arguments = [MminL, MmaxL, edge_states, N, lz_center_val, *hamiltonian_labels,
+                 *parameters, window_of_lz, num_of_eigstates, 'calc_lz_resolved_spectrum']
+
     arguments = [str(a) for a in arguments]
     arguments = " ".join(arguments)
     job_dict['kargs_dict']['Arguments'] = arguments
@@ -204,6 +230,150 @@ def job_dict_complete_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label,
     return job_dict
 
 
+def job_dict_luttinger_parameter(MminL, MmaxL, edge_states, N, hamiltonian_labels, parameters, num_of_eigstates,
+                                 magnetic_flux=None, requestMemory=None, request_cpus=None):
+    job_dict = {}
+
+    job_dict['batch_parameters'] = [{}]
+    job_dict['py_script_path'] = project_dir + "/" + scriptNames.multiFile
+    job_dict['kargs_dict'] = {}
+
+    if magnetic_flux != None:
+        hamiltonian_labels = [hl + '_' + str(magnetic_flux) for hl in hamiltonian_labels]
+
+    arguments = [MminL, MmaxL, edge_states, N, *hamiltonian_labels, *parameters, num_of_eigstates,
+                 'calc_luttinger_parameter']
+
+    arguments = [str(a) for a in arguments]
+    arguments = " ".join(arguments)
+    job_dict['kargs_dict']['Arguments'] = arguments
+
+    if request_cpus:
+        job_dict['kargs_dict']['request_cpus'] = request_cpus
+    if requestMemory:
+        job_dict['kargs_dict']['requestMemory'] = requestMemory
+
+    return job_dict
+
+
+def calc_lz_resolved_spectrum_DAG(dag_dir_name, jobs_comp_requirements, MminL, MmaxL, edge_states, N, lz_center_val,
+                                  hamiltonian_labels,
+                                  parameters, num_of_eigstates=20, magnetic_flux=None, window_of_lz='all'):
+    if magnetic_flux != None:
+        hamiltonian_labels = [hl + '_' + str(magnetic_flux) for hl in hamiltonian_labels]
+
+    filename_full_spectrum = FM.filename_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels,
+                                                       parameters)
+
+    if FM.does_file_really_exist(filename_full_spectrum):
+        print("spectrum already exists")
+        return 0
+
+    Mmin = MminL - edge_states
+    Mmax = MmaxL + edge_states
+    lz_total_vals = LCA.find_all_lz_total_values(Mmin, Mmax, N)
+
+    if window_of_lz == 'all':
+        lz_min = lz_total_vals[0]
+        lz_max = lz_total_vals[-1]
+
+    else:
+        lz_min = max(lz_center_val - window_of_lz, lz_total_vals[0])
+        lz_max = min(lz_center_val + window_of_lz, lz_total_vals[-1])
+
+    jobs_information_dict = {}
+
+    jobs_information_dict['calc_spectrum'] = job_dict_get_spectrum(MminL, MmaxL, edge_states, N, '$(lz_val)',
+                                                                   hamiltonian_labels, parameters, num_of_eigstates,
+                                                                   magnetic_flux, False,
+                                                                   **jobs_comp_requirements['calc_spectrum'])
+    spectrum_batch_parms = []
+    for lz in range(lz_min, lz_max + 1):
+        filename_spectrum = FM.filename_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels,
+                                                           parameters)
+        if not FM.does_file_really_exist(filename_spectrum):
+            spectrum_batch_parms.append({'lz_val': str(lz)})
+
+    jobs_information_dict['calc_spectrum']['batch_parameters'] = spectrum_batch_parms
+
+    jobs_information_dict['unite_lz_resolved'] = job_dict_lz_resolved_spectrum(MminL, MmaxL, edge_states, N,
+                                                                               lz_center_val, hamiltonian_labels,
+                                                                               parameters, window_of_lz,
+                                                                               num_of_eigstates, magnetic_flux,
+                                                                               **jobs_comp_requirements[
+                                                                                   'unite_lz_resolved'])
+    dag_graph = nx.DiGraph()
+    dag_graph.add_edges_from([('calc_spectrum', 'unite_lz_resolved')])
+    send_minimal_dag_job(dag_graph, dag_dir_name, jobs_information_dict)
+    return 0
+
+
+def calc_luttinger_parameter_DAG(dag_dir_name, jobs_comp_requirements, MminL, MmaxL, edge_states, N, lz_center_val,
+                                 hamiltonian_labels, parameters, num_of_eigstates=20, magnetic_flux=None):
+    if magnetic_flux != None:
+        hamiltonian_labels = [hl + '_' + str(magnetic_flux) for hl in hamiltonian_labels]
+    window_of_lz = 'all'
+    filename_full_spectrum = FM.filename_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels,
+                                                       parameters)
+    filename_lut_spectrum = FM.filename_spectrum_luttinger_parm(MminL, MmaxL, edge_states, N, window_of_lz,
+                                                                hamiltonian_labels, parameters)
+
+    if FM.does_file_really_exist(filename_full_spectrum) or FM.does_file_really_exist(filename_lut_spectrum):
+        print("spectrum already exists. no need for cluster")
+        return 0
+
+    first_arc_lz = np.array([lz_center_val + i for i in range(N)])
+    umbrella_lz = np.array([lz_center_val - N * edge_states + N * i for i in range(2 * edge_states + 1)])
+    lz_vals_to_add_spectrum = np.concatenate((first_arc_lz, umbrella_lz))
+
+    jobs_information_dict = {}
+
+    jobs_information_dict['calc_spectrum'] = job_dict_get_spectrum(MminL, MmaxL, edge_states, N, '$(lz_val)',
+                                                                   hamiltonian_labels, parameters, num_of_eigstates,
+                                                                   magnetic_flux, False,
+                                                                   **jobs_comp_requirements['calc_spectrum'])
+    spectrum_batch_parms = []
+    for lz in lz_vals_to_add_spectrum:
+        filename_spectrum = FM.filename_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels,
+                                                           parameters)
+        if not FM.does_file_really_exist(filename_spectrum):
+            spectrum_batch_parms.append({'lz_val': str(lz)})
+
+    jobs_information_dict['calc_spectrum']['batch_parameters'] = spectrum_batch_parms
+
+    jobs_information_dict['luttinger_parameter'] = job_dict_lz_resolved_spectrum(MminL, MmaxL, edge_states, N,
+                                                                                 lz_center_val, hamiltonian_labels,
+                                                                                 parameters, window_of_lz,
+                                                                                 num_of_eigstates, magnetic_flux,
+                                                                                 **jobs_comp_requirements[
+                                                                                     'luttinger_parameter'])
+    dag_graph = nx.DiGraph()
+    dag_graph.add_edges_from([('calc_spectrum', 'luttinger_parameter')])
+    send_minimal_dag_job(dag_graph, dag_dir_name, jobs_information_dict)
+    return 0
+
+
+def get_spectrum_batch_jobs(batch_parameters, MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters,
+                            num_of_eigstates=20, magnetic_flux=None, return_eigvecs=True, requestMemory=None,
+                            request_cpus=None):
+    kargs_dict = job_dict_get_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters,
+                                       num_of_eigstates, magnetic_flux, return_eigvecs, requestMemory, request_cpus)[
+        'kargs_dict']
+    py_path = project_dir + "/" + scriptNames.multiFile
+    CondorJobSender.send_batch_of_jobs_to_condor(py_path, 'get_spectrum', batch_parameters, **kargs_dict)
+    return 0
+
+
+def get_spectrum_job(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, num_of_eigstates=20,
+                     magnetic_flux=None, return_eigvecs=True, requestMemory=None, request_cpus=None):
+    kargs_dict = job_dict_get_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters,
+                                       num_of_eigstates, magnetic_flux, return_eigvecs, requestMemory, request_cpus)[
+        'kargs_dict']
+    py_path = project_dir + "/" + scriptNames.multiFile
+    CondorJobSender.send_job_to_condor(py_path, 'get_spectrum', **kargs_dict)
+    return 0
+
+
 def get_spectrum_DAG(dag_dir_name, jobs_comp_requirements, MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
                      parameters, num_of_eigstates=20, magnetic_flux=None, speeding_parameter=1):
     hamiltonian_terms_names = ['interactions', 'confining_potential', 'SC_term', 'FM_term']
@@ -212,7 +382,7 @@ def get_spectrum_DAG(dag_dir_name, jobs_comp_requirements, MminL, MmaxL, edge_st
         hamiltonian_labels = [hl + '_' + str(magnetic_flux) for hl in hamiltonian_labels]
 
     filename_spectrum_eigstates = FM.filename_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val,
-                                                               hamiltonian_labels, parameters)
+                                                                   hamiltonian_labels, parameters)
     if FM.does_file_really_exist(filename_spectrum_eigstates):
         print("already created " + filename_spectrum_eigstates)
         return 0
@@ -251,11 +421,11 @@ def get_spectrum_DAG(dag_dir_name, jobs_comp_requirements, MminL, MmaxL, edge_st
 
     jobs_information_dict['calc_spectrum'] = job_dict_get_spectrum(MminL, MmaxL, edge_states, N, lz_val,
                                                                    hamiltonian_labels, parameters, num_of_eigstates,
-                                                                   magnetic_flux,
+                                                                   magnetic_flux, True,
                                                                    **jobs_comp_requirements['calc_spectrum'])
     edges_from_unite_to_last_node = list(itertools.product(uniting_jobs, ['calc_spectrum']))
     dag_graph.add_edges_from(edges_from_unite_to_last_node)
-    print(list(dag_graph.nodes))
+    # print(list(dag_graph.nodes))
 
     send_minimal_dag_job(dag_graph, dag_dir_name, jobs_information_dict)
     return 0
@@ -270,7 +440,7 @@ def complete_MB_matrix_job(MminL, MmaxL, edge_states, N, lz_val, matrix_label, m
         print("already created " + filename_complete_matrix)
         return 0
     kargs_dict = job_dict_complete_matrix(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name,
-                                          requestMemory, request_cpus)
+                                          requestMemory, request_cpus)['kargs_dict']
     py_path = project_dir + "/" + scriptNames.multiFile
     CondorJobSender.send_job_to_condor(py_path, 'create_complete_matrix', **kargs_dict)
     return 0
@@ -341,4 +511,3 @@ def remove_empty_nodes(dag, jobs_information_dict):
             dag.remove_node(jobname)
 
     return dag
-
