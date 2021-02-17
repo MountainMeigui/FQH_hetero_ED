@@ -66,7 +66,12 @@ def calc_low_lying_spectrum():
     parameters = sys.argv[10:14]
     parameters = [float(p) for p in parameters]
     num_of_eigstates = int(sys.argv[14])
-    AMAS.get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, num_of_eigstates)
+    return_eigstates = True
+    if len(sys.argv) == 17 and sys.argv[15] == 'False':
+        return_eigstates = False
+
+    AMAS.get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, num_of_eigstates,
+                                0, return_eigstates)
     return 0
 
 
@@ -82,6 +87,72 @@ def create_complete_matrix():
     return 0
 
 
+def calc_lz_resolved_spectrum():
+    MminL, MmaxL, edge_states, N, lz_center_val = sys.argv[1:6]
+    MminL = int(MminL)
+    MmaxL = int(MmaxL)
+    edge_states = int(edge_states)
+    N = int(N)
+    lz_center_val = int(lz_center_val)
+    hamiltonian_labels = sys.argv[6:10]
+    parameters = sys.argv[10:14]
+    parameters = [float(p) for p in parameters]
+    window_of_lz = sys.argv[14]
+    if not window_of_lz == 'all':
+        window_of_lz = int(window_of_lz)
+    num_of_eigstates = int(sys.argv[15])
+
+    AMAS.calc_lz_resolved_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_center_val, hamiltonian_labels,
+                                             parameters, window_of_lz, num_of_eigstates)
+    return 0
+
+
+def calc_luttinger_parameter():
+    MminL, MmaxL, edge_states, N = sys.argv[1:5]
+    MminL = int(MminL)
+    MmaxL = int(MmaxL)
+    edge_states = int(edge_states)
+    N = int(N)
+    hamiltonian_labels = sys.argv[5:9]
+    parameters = sys.argv[9:13]
+    parameters = [float(p) for p in parameters]
+    num_of_eigstates = int(sys.argv[13])
+
+    AMAS.calc_luttinger_parameter(MminL, MmaxL, edge_states, N, hamiltonian_labels, parameters, num_of_eigstates)
+    return 0
+
+
+def calc_spectra_for_range_lz():
+    MminL, MmaxL, edge_states, N, lz_min, lz_max = sys.argv[1:7]
+    MminL = int(MminL)
+    MmaxL = int(MmaxL)
+    edge_states = int(edge_states)
+    N = int(N)
+    lz_min = int(lz_min)
+    lz_max = int(lz_max)
+    hamiltonian_labels = sys.argv[7:11]
+    parameters = sys.argv[11:15]
+    parameters = [float(p) for p in parameters]
+    num_of_eigstates = int(sys.argv[15])
+    return_eigvectors = sys.argv[16]
+    if return_eigvectors == 'True':
+        return_eigvectors = True
+    else:
+        return_eigvectors = False
+
+    for lz in range(lz_min, lz_max + 1):
+        if return_eigvectors:
+            filename_spectrum = FM.filename_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels,
+                                                                 parameters)
+        else:
+            filename_spectrum = FM.filename_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels,
+                                                               parameters)
+        if not FM.does_file_really_exist(filename_spectrum):
+            AMAS.get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels, parameters,
+                                        num_of_eigstates, 0, return_eigvectors)
+    return 0
+
+
 if which_function == 'create_basis':
     create_basis()
 if which_function == 'create_two_particle_hamiltonian':
@@ -90,6 +161,12 @@ if which_function == 'calc_low_lying_spectrum':
     calc_low_lying_spectrum()
 if which_function == 'create_complete_matrix':
     create_complete_matrix()
+if which_function == 'calc_lz_resolved_spectrum':
+    calc_lz_resolved_spectrum()
+if which_function == 'calc_spectra_for_range_lz':
+    calc_spectra_for_range_lz()
+if which_function == 'calc_luttinger_parameter':
+    calc_luttinger_parameter()
 
 
 def calc_spectrum_eigenstates_with_flux():
