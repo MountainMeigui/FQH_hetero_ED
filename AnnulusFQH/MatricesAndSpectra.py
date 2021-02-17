@@ -231,29 +231,44 @@ def calc_lz_total_for_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian
 
 
 def get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, num_of_eigstates,
-                           run_on_cluster=1):
+                           run_on_cluster=1, return_eigstates=True):
     if lz_val != 'not_fixed':
         lz_val = int(float(lz_val))
     filename_spectrum = FM.filename_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
                                                          parameters)
     if FM.does_file_really_exist(filename_spectrum):
-        spectrum = FM.read_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters)
         size_hilbert_space = GA.size_of_hilbert_space(MminL - edge_states, MmaxL + edge_states, N, lz_val)
-        if len(spectrum['eigVals']) >= num_of_eigstates or size_hilbert_space <= num_of_eigstates:
-            return spectrum
+        if return_eigstates:
+            spectrum = FM.read_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
+                                                    parameters)
+            if len(spectrum['eigVals']) >= num_of_eigstates or size_hilbert_space <= num_of_eigstates:
+                return spectrum
+        else:
+            eigVals = FM.read_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters)
+            if len(eigVals) >= num_of_eigstates or size_hilbert_space <= num_of_eigstates:
+                return eigVals
 
     hamiltonian = extract_Hamiltonian(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters,
                                       run_on_cluster)
-    eigVals, eigVecs = calc_eigenVals_Vecs(hamiltonian, num_of_eigstates)
-    spectrum = {'eigVals': eigVals, 'eigVecs': eigVecs}
-    FM.write_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, spectrum)
-    return spectrum
+    if return_eigstates:
+        eigVals, eigVecs = calc_eigenVals_Vecs(hamiltonian, num_of_eigstates)
+        spectrum = {'eigVals': eigVals, 'eigVecs': eigVecs}
+        FM.write_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, spectrum)
+        return spectrum
+
+    else:
+        eigVals = calc_eigenVals_Vecs(hamiltonian, num_of_eigstates, return_eigenvectors=False)
+        FM.write_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, eigVals)
+        return eigVals
 
 
 def calc_matrix_in_subspace(MminL, MmaxL, edge_states, N, lz_val, matrix_label, matrix_name,
                             filename_spectrum_eigenstates, num_states):
     args = [MminL, MmaxL, edge_states, N, lz_val, matrix_label]
     filename_subspace_matrix = FM.filename_edge_subspace_matrix(matrix_name, num_states, args)
+    if FM.does_file_really_exist(filename_subspace_matrix):
+        subspace_matrix = FM.read_edge_subspace_matrix(matrix_name, num_states, args)
+        return subspace_matrix
 
     spectrum_eigenstates = FM.read_spectrum_eigenstates_from_file(filename_spectrum_eigenstates)
 
@@ -377,8 +392,8 @@ def get_groundstate(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, pa
     return gs
 
 
-def calc_full_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_center_val, hamiltonian_labels, parameters,
-                                 window_of_lz, num_eigenstates):
+def calc_lz_resolved_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_center_val, hamiltonian_labels, parameters,
+                                        window_of_lz, num_eigenstates):
     """
     Calculate total-angular-momentum-resolved spectrum. Create matrices if they are not present.
     :param MminL:
@@ -414,9 +429,14 @@ def calc_full_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_center_val, ha
 
     full_spectrum = {}
     for lz in range(lz_min, lz_max + 1):
-        print("finding the spectrum for lz=" + str(lz))
-        hamiltonian = extract_Hamiltonian(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels, parameters, 0)
-        spectrum_lz = calc_eigenVals_Vecs(hamiltonian, num_eigenstates, return_eigenvectors=False)
+        filename_spectrum = FM.filename_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels,
+                                                           parameters)
+        if FM.does_file_really_exist(filename_spectrum):
+            spectrum_lz = FM.read_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels, parameters)
+        else:
+            print("finding the spectrum for lz=" + str(lz))
+            hamiltonian = extract_Hamiltonian(MminL, MmaxL, edge_states, N, lz, hamiltonian_labels, parameters, 0)
+            spectrum_lz = calc_eigenVals_Vecs(hamiltonian, num_eigenstates, return_eigenvectors=False)
         full_spectrum[lz] = spectrum_lz
 
     title = 'low spectrum of system with\nN=' + str(N) + ' MminL=' + str(MminL) + ' MmaxL=' + str(
@@ -448,11 +468,59 @@ def count_num_edge_states(edge_states, N):
 #     val = sum([p[i] * np.power(x, highest_power - i) for i in range(len(p))])
 #     return val
 
+def calc_luttinger_parameter(MminL, MmaxL, edge_states, N, hamiltonian_labels, parameters,
+                             num_eigenstates, lz_center_val=None, cutoff_edges=True, plot_graphs_to_check=False):
+    """
+    Calculating the luttinger liquid parameter.
+    NOT compatible for large systems that need to be broken down
+    and processed in pieces on the CLuster
+    :param params_filename:
+    :param lz_center_val:
+    :param plot_graphs_to_check:
+    :param do_spectrum_calculation:
+    :param cutoff_edges:
+    :return:
+    """
 
-def calc_luttinger_parameter_from_full_spectrum(full_spectrum, lz_center_val, N, edge_states):
+    if lz_center_val == None:
+        lz_center_val = 3 / 2 * N * (N - 1) + N * MminL
+        lz_center_val = int(lz_center_val)
+    window_of_lz = 'all'
+    filename_lut_spectrum = FM.filename_spectrum_luttinger_parm(MminL, MmaxL, edge_states, N, window_of_lz,
+                                                                hamiltonian_labels, parameters)
+    filename_full_spectrum = FM.filename_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels,
+                                                       parameters)
+
+    first_arc_lz = np.array([lz_center_val + i for i in range(N)])
+    umbrella_lz = np.array([lz_center_val - N * edge_states + N * i for i in range(2 * edge_states + 1)])
+
+    if FM.does_file_really_exist(filename_lut_spectrum):
+        full_spectrum = FM.read_spectrum_luttinger_parm(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels,
+                                                        parameters)
+    elif FM.does_file_really_exist(filename_full_spectrum):
+        full_spectrum = FM.read_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels,
+                                              parameters)
+    else:
+        full_spectrum = {}
+
+        lz_vals_to_add_spectrum = np.concatenate((first_arc_lz, umbrella_lz))
+        for lz_val in lz_vals_to_add_spectrum:
+            spectrum_lz = get_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
+                                                 parameters, num_eigenstates, 0, return_eigstates=False)
+            full_spectrum[lz_val] = spectrum_lz
+
+        graphData.write_spectrum_data_to_file(filename_lut_spectrum, full_spectrum, 'luttinger partial spectrum',
+                                              'Total angular momentum', 'Energy')
+
+    g = calc_luttinger_parameter_from_full_spectrum(full_spectrum, lz_center_val, N, edge_states, cutoff_edges,
+                                                    plot_graphs_to_check)
+    return g
+
+
+def calc_luttinger_parameter_from_full_spectrum(full_spectrum, lz_center_val, N, edge_states, cutoff_edges=True,
+                                                plot_graphs_to_check=False):
     """
         Calculate Luttinger parameter from spectrum.
-        Note - if the spectrum doesn't exists, the script creates it.
         :param params_filename:
         :param lz_center_val:
         :return:
@@ -460,14 +528,21 @@ def calc_luttinger_parameter_from_full_spectrum(full_spectrum, lz_center_val, N,
 
     first_arc_lz = np.array([lz_center_val + i for i in range(N)])
     first_arc_energy = np.array([full_spectrum[lz][0] for lz in first_arc_lz])
-    omega_s = extract_omega_s_from_first_arc(first_arc_lz, first_arc_energy)
+    omega_s = extract_omega_s_from_first_arc(first_arc_lz, first_arc_energy, plot_graphs_to_check)
 
     umbrella_lz = np.array(
         [lz_center_val - N * edge_states + N * i for i in range(2 * edge_states + 1)])
     umbrella_energy = np.array([full_spectrum[lz][0] for lz in umbrella_lz])
     umbrella_J = np.array([2 * excitation for excitation in range(-edge_states, edge_states + 1)])
 
-    omega_J = extract_omega_J_from_umbrella_J(umbrella_J, umbrella_lz, umbrella_energy)
+    if cutoff_edges:
+        dif = edge_states - 4
+        if dif > 0:
+            umbrella_J = umbrella_J[dif:-dif]
+            umbrella_lz = umbrella_lz[dif:-dif]
+            umbrella_energy = umbrella_energy[dif:-dif]
+
+    omega_J = extract_omega_J_from_umbrella_J(umbrella_J, umbrella_lz, umbrella_energy, plot_graphs_to_check)
 
     omega2 = (full_spectrum[lz_center_val + 1][0] - full_spectrum[lz_center_val][0]) / 2 + (
             full_spectrum[lz_center_val - 1][0] - full_spectrum[lz_center_val][0]) / 2
@@ -478,7 +553,6 @@ def calc_luttinger_parameter_from_full_spectrum(full_spectrum, lz_center_val, N,
     print("g calculation = " + str(g))
     print("linear approximation for g = " + str(g2))
     return g
-
 
 
 def extract_omega_s_from_first_arc(first_arc_lz, first_arc_energy, plot_graphs_to_check=True):
@@ -551,7 +625,7 @@ def calc_luttinger_parameter_from_scratch(params_filename, lz_center_val, plot_g
     umbrella_lz = np.array(
         [lz_center_val - params.N * params.edge_states + params.N * i for i in range(2 * params.edge_states + 1)])
 
-    if EC.does_file_really_exist(filename_full_spectrum):
+    if FM.does_file_really_exist(filename_full_spectrum):
         full_spectrum = FM.read_spectrum_luttinger_parm(params.MminLaughlin, params.MmaxLaughlin, params.edge_states,
                                                         params.N, window_of_lz, params.hamiltonian_labels,
                                                         params.h_parameters)
