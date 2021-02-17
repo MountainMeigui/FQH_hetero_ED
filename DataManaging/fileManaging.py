@@ -11,7 +11,7 @@ if os.getcwd()[0] == "/":
     file = open(project_dir + '/configurations.yml', 'r')
 
 else:
-    file = open('../configurations.yml', 'r')
+    file = open('./configurations.yml', 'r')
 
 docs = yaml.full_load(file)
 file.close()
@@ -197,7 +197,7 @@ def filename_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonia
     filename = 'low_lying_spectrum_' + '_'.join(common_args) + '_'
 
     hamiltonian_args = [str(hamiltonian_labels[i]) + '_' + str(parameters[i]) for i in range(len(hamiltonian_labels))]
-    filename = filename + '_'.join(hamiltonian_args) + '.pkl'
+    filename = filename + '_'.join(hamiltonian_args) + '.npz'
     directory = 'pkl_data/low_lying_spectrum_annulus/' + str(N) + '_particles/'
     storage_dir = get_storage_dir()
     directory = storage_dir + directory
@@ -241,18 +241,19 @@ def filename_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltoni
     hamiltonian_args = [str(hamiltonian_labels[i]) + '_' + str(parameters[i]) for i in range(len(hamiltonian_labels))]
     args = [MminL, MmaxL, edge_states, N, 'Ham_lbls', *hamiltonian_args, 'lz_win', window_of_lz]
     args = [str(a) for a in args]
-    filename = 'full_spectrum_' + '_'.join(args) + '.npz'
+    filename = 'full_spectrum_' + '_'.join(args) + '.pkl'
     directory = directory_full_spectrum(MminL, MmaxL, edge_states, N)
     filename = directory + filename
     return filename
 
 
 def read_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels, parameters):
-    """
-    Note: the spectrum keys are the angular momentum values in STRING format
-    """
     filename = filename_full_spectrum(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels, parameters)
-    spectrum = dict(np.load(filename))
+    file1 = open(filename, 'rb')
+    data = pickle.load(file1)
+    file1.close()
+
+    spectrum = data['spectrum']
     return spectrum
 
 
@@ -262,19 +263,20 @@ def filename_spectrum_luttinger_parm(MminL, MmaxL, edge_states, N, window_of_lz,
     hamiltonian_args = [str(hamiltonian_labels[i]) + '_' + str(parameters[i]) for i in range(len(hamiltonian_labels))]
     args = [MminL, MmaxL, edge_states, N, 'Ham_lbls', *hamiltonian_args, 'lz_win', window_of_lz]
     args = [str(a) for a in args]
-    filename = 'luttinger_parm_spectrum_' + '_'.join(args) + '.npz'
+    filename = 'luttinger_parm_spectrum_' + '_'.join(args) + '.pkl'
     directory = directory_full_spectrum(MminL, MmaxL, edge_states, N)
     filename = directory + filename
     return filename
 
 
 def read_spectrum_luttinger_parm(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels, parameters):
-    """
-        Note: the spectrum keys are the angular momentum values in STRING format
-    """
     filename = filename_spectrum_luttinger_parm(MminL, MmaxL, edge_states, N, window_of_lz, hamiltonian_labels,
                                                 parameters)
-    spectrum = dict(np.load(filename))
+    file1 = open(filename, 'rb')
+    data = pickle.load(file1)
+    file1.close()
+
+    spectrum = data['spectrum']
     return spectrum
 
 
@@ -282,7 +284,7 @@ def filename_spectrum_lz_total_vals(MminL, MmaxL, edge_states, N, hamiltonian_la
     hamiltonian_args = [str(hamiltonian_labels[i]) + '_' + str(parameters[i]) for i in range(len(hamiltonian_labels))]
     args = [MminL, MmaxL, edge_states, N, 'Ham_lbls', *hamiltonian_args]
     args = [str(a) for a in args]
-    filename = 'spectrum_lz_total_vals_' + '_'.join(args) + '.npz'
+    filename = 'spectrum_lz_total_vals_' + '_'.join(args) + '.pkl'
     directory = directory_full_spectrum(MminL, MmaxL, edge_states, N)
     filename = directory + filename
     return filename
@@ -335,6 +337,11 @@ def read_spectrum_eigenstates_from_file(filename):
 def write_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters, spectrum):
     filename = filename_spectrum_eigenstates(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels, parameters)
     np.savez(filename, **spectrum)
+    filename_spectrum = filename_low_lying_spectrum(MminL, MmaxL, edge_states, N, lz_val, hamiltonian_labels,
+                                                    parameters)
+    if not does_file_really_exist(filename_spectrum):
+        np.savez(filename_spectrum, spectrum=spectrum['eigVals'])
+
     return 0
 
 
